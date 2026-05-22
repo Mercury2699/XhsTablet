@@ -61,15 +61,15 @@ class MainHook : IXposedHookLoadPackage {
             "com.xingin.adaptation.device.DeviceInfoContainer", classLoader
         )
 
-        // isPad() → true
+        // isPad() → false (保持手机 UI)
         XposedHelpers.findAndHookMethod(clazz, "isPad",
-            XC_MethodReplacement.returnConstant(true))
-        XposedBridge.log("[$TAG] Hooked isPad() → true")
+            XC_MethodReplacement.returnConstant(false))
+        XposedBridge.log("[$TAG] Hooked isPad() → false (phone UI)")
 
-        // getDeviceType() → "pad"
+        // getDeviceType() → "pad" (服务端仍认为是平板，占 pad 槽位)
         XposedHelpers.findAndHookMethod(clazz, "getDeviceType",
             XC_MethodReplacement.returnConstant("pad"))
-        XposedBridge.log("[$TAG] Hooked getDeviceType() → pad")
+        XposedBridge.log("[$TAG] Hooked getDeviceType() → pad (server slot)")
 
         // predictPad() → true
         XposedHelpers.findAndHookMethod(clazz, "predictPad",
@@ -96,9 +96,9 @@ class MainHook : IXposedHookLoadPackage {
                 }
             })
 
-        // isPhone() → false
+        // isPhone() → true (保持手机身份用于 UI)
         XposedHelpers.findAndHookMethod(clazz, "isPhone",
-            XC_MethodReplacement.returnConstant(false))
+            XC_MethodReplacement.returnConstant(true))
     }
 
     /**
