@@ -62,10 +62,8 @@ class MainHook : IXposedHookLoadPackage {
             "com.xingin.adaptation.device.DeviceInfoContainer", classLoader
         )
 
-        // isPad() → false (保持手机 UI)
-        XposedHelpers.findAndHookMethod(clazz, "isPad",
-            XC_MethodReplacement.returnConstant(false))
-        XposedBridge.log("[$TAG] Hooked isPad() → false (phone UI)")
+        // isPad() → 由 hookReporting 中的 stack-aware hook 处理
+        // UI 调用返回 false（手机布局），上报调用返回 true（平板身份）
 
         // getDeviceType() → "pad" (服务端仍认为是平板，占 pad 槽位)
         XposedHelpers.findAndHookMethod(clazz, "getDeviceType",
@@ -120,19 +118,32 @@ class MainHook : IXposedHookLoadPackage {
         }
 
         // Hook HashMap.put 在 Bridge 调用中拦截 "isTablet" key
-        try {
-            XposedHelpers.findAndHookMethod(java.util.HashMap::class.java, "put",
-                Any::class.java, Any::class.java, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (param.args[0] == "isTablet" && param.args[1] == false) {
-                            param.args[1] = true
-                        }
-                    }
-                })
-            XposedBridge.log("[$TAG] Hooked HashMap.put for isTablet override")
-        } catch (e: Throwable) {
-            XposedBridge.log("[$TAG] HashMap.put hook failed: ${e.message}")
-        }
+        // 注意：只 hook DeviceInfoContainer.isPad 的调用方，避免全局 HashMap hook 的性能问题
+        // 由于 isPad() 已被 hook 为 false（UI 用途），我们需要在上报时覆盖
+        // 方案：hook bcc.c0 中的上报方法太脆弱（混淆类名会变），
+        // 改为让 isPad() 根据调用栈动态返回
+        // 最终方案：移除 HashMap 全局 hook，改为让 isPad() 在非 UI 调用时返回 true
+        val clazz = XposedHelpers.findClass(
+            "com.xingin.adaptation.device.DeviceInfoContainer", classLoader
+        )
+        // 覆盖之前的 isPad hook：根据调用栈判断
+        XposedHelpers.findAndHookMethod(clazz, "isPad", object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val stack = Throwable().stackTrace
+                val isUiCall = stack.any {
+                    it.className.contains("Activity") ||
+                    it.className.contains("Fragment") ||
+                    it.className.contains("View") ||
+                    it.className.contains("Adapter") ||
+                    it.className.contains("Layout") ||
+                    it.className.contains("Presenter") ||
+                    it.className.contains("ui.", ignoreCase = true)
+                }
+                // UI 调用返回 false（手机布局），其他调用返回 true（上报为平板）
+                param.result = !isUiCall
+            }
+        })
+        XposedBridge.log("[$TAG] Hooked isPad() with stack-aware logic")
     }
 
     /**
