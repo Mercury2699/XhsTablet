@@ -30,6 +30,7 @@ class MainHook : IXposedHookLoadPackage {
         try {
             hookBuildFields()
             hookDeviceInfoContainer(lpparam.classLoader)
+            hookReporting(lpparam.classLoader)
             hookSystemProperties(lpparam.classLoader)
         } catch (e: Throwable) {
             XposedBridge.log("[$TAG] Error: ${e.message}")
@@ -99,6 +100,39 @@ class MainHook : IXposedHookLoadPackage {
         // isPhone() → true (保持手机身份用于 UI)
         XposedHelpers.findAndHookMethod(clazz, "isPhone",
             XC_MethodReplacement.returnConstant(true))
+    }
+
+    /**
+     * Hook 上报层，确保 isTablet/isPad 字段对服务端报 true
+     * bcc/c0.java: hashMap.put("isTablet", deviceInfoContainer.isPad())
+     * js.g.b(context): 读取 monitor SharedPreferences 判断 isPad
+     */
+    private fun hookReporting(classLoader: ClassLoader) {
+        // Hook js.g.b(context) → true (埋点上报中的 isPad 判断)
+        try {
+            val monitorClass = XposedHelpers.findClass("js.g", classLoader)
+            XposedHelpers.findAndHookMethod(monitorClass, "b",
+                android.content.Context::class.java,
+                XC_MethodReplacement.returnConstant(true))
+            XposedBridge.log("[$TAG] Hooked js.g.b() → true (reporting)")
+        } catch (e: Throwable) {
+            XposedBridge.log("[$TAG] js.g.b hook failed: ${e.message}")
+        }
+
+        // Hook HashMap.put 在 Bridge 调用中拦截 "isTablet" key
+        try {
+            XposedHelpers.findAndHookMethod(java.util.HashMap::class.java, "put",
+                Any::class.java, Any::class.java, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (param.args[0] == "isTablet" && param.args[1] == false) {
+                            param.args[1] = true
+                        }
+                    }
+                })
+            XposedBridge.log("[$TAG] Hooked HashMap.put for isTablet override")
+        } catch (e: Throwable) {
+            XposedBridge.log("[$TAG] HashMap.put hook failed: ${e.message}")
+        }
     }
 
     /**
